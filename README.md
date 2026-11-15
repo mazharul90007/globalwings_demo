@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SVP Schedule Management – clickable prototype
 
-## Getting Started
+A front-end-only prototype of the Schedule Management feature for the SVP staff portal. All data is dummy data held in memory. Nothing is saved, and a page reload resets the demo.
 
-First, run the development server:
+The demo clock is fixed at **Thursday 19 November 2026, 10:35 AM**, so everyone sees the same calendar.
+
+## Pages
+
+| Path | What it shows |
+| --- | --- |
+| `/schedule` | Schedule calendar (`/` redirects here): week, day and month views, create drawer, meeting and to-do details, Today panel |
+| `/menu/<item>` | Notice page for every sidebar item except Schedule (Dashboard, Leads, ...) with a link to the main GlobalWings site |
+| `/schedule/reports` | Schedule reports with filters and CSV export |
+| `/email` | Invite email, "Updated time" email and cancellation email |
+| `/respond?a=accept` | Public response page for invitees (accept, reject, cancelled, expired) |
+
+## Things to try in a demo
+
+- Click an empty slot on the calendar for quick add, or use **New** for the full form.
+- In the meeting form, set the time first. The staff dropdown lists only staff who are free at that time.
+- Open **Marketing plan review** (Thu 4 PM) and accept it to see the clash warning.
+- Open **University partnership call** (Wed 2 PM) to add notes, follow-ups and attendance.
+- Wait about 9 seconds on the calendar: a live "Rahim Uddin accepted" toast arrives.
+
+## Run locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy to Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Push this folder to a Git repository and import it in Vercel, or run `npx vercel` in this folder. No environment variables are needed.
