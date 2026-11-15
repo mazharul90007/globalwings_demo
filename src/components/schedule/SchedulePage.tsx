@@ -142,7 +142,7 @@ function ScheduleView() {
         </div>
 
         {/* Calendar */}
-        <Card className="flex min-w-0 flex-col overflow-hidden">
+        <Card className="flex min-w-0 flex-col self-start overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
             <Button variant="ghost" size="sm" onClick={() => setAnchor(TODAY)}>Today</Button>
             <div className="flex">

@@ -71,7 +71,7 @@ export function TimeGrid({
   // Open at 8 AM, or one hour before now when it is later than that.
   const firstScroll = useRef(Math.max(SCROLL_HOUR, Math.floor(nowMin / 60) - 1));
   useEffect(() => {
-    scroller.current?.scrollTo({ top: (firstScroll.current - DAY_START) * HOUR_PX - HOUR_PX / 2 });
+    scroller.current?.scrollTo({ top: (firstScroll.current - DAY_START) * HOUR_PX - HOUR_PX / 2 + 8 });
   }, []);
 
   const cols = `56px repeat(${days.length}, minmax(0, 1fr))`;
@@ -132,16 +132,18 @@ export function TimeGrid({
       </div>
 
       {/* Time grid */}
-      <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto scrollbar-thin" style={{ maxHeight: "calc(100vh - 330px)", minHeight: 460 }}>
-        <div className="grid" style={{ gridTemplateColumns: cols, height: hours.length * HOUR_PX }}>
+      {/* Fixed height that fits the screen, so the card never shows empty space below the grid. */}
+      <div ref={scroller} className="relative overflow-y-auto scrollbar-thin" style={{ height: "calc(100vh - 375px)", minHeight: 460 }}>
+        {/* Padding above and below, so the first and last hour labels (12 AM) are not cut off. */}
+        <div className="grid py-2" style={{ gridTemplateColumns: cols, height: hours.length * HOUR_PX + 16, boxSizing: "border-box" }}>
           <div className="relative">
-            {hours.map((h) => (
+            {[...hours, DAY_END].map((h) => (
               <span
                 key={h}
-                className="absolute right-2 -translate-y-1/2 text-[11px] text-muted"
+                className="absolute right-2 -translate-y-1/2 whitespace-nowrap text-[11px] text-muted"
                 style={{ top: (h - DAY_START) * HOUR_PX }}
               >
-                {h === DAY_START ? "" : `${h % 12 === 0 ? 12 : h % 12} ${h >= 12 ? "PM" : "AM"}`}
+                {`${h % 12 === 0 ? 12 : h % 12} ${h % 24 >= 12 ? "PM" : "AM"}`}
               </span>
             ))}
           </div>
@@ -164,6 +166,8 @@ export function TimeGrid({
                     <div className="border-t border-dashed border-line/70" style={{ marginTop: HOUR_PX / 2 - 1 }} />
                   </div>
                 ))}
+                {/* Closing line at midnight, under the last hour. */}
+                <div className="absolute inset-x-0 border-t border-line" style={{ top: hours.length * HOUR_PX }} />
                 {placed.map((p) => (
                   <div
                     key={p.item.id}
