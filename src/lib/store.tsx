@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { INITIAL_ITEMS, INITIAL_NOTIFICATIONS, ME, staffById } from "./data";
-import { isMeeting } from "./logic";
+import { assigneeOf, isMeeting, isTodo } from "./logic";
 import { fmtDate, fmtTime, stampNow } from "./time";
 import type { AppNotification, Attendance, Meeting, ScheduleItem, Todo } from "./types";
 
@@ -35,6 +35,8 @@ interface Store {
   deleteItem: (id: string) => void;
   toggleDone: (id: string) => void;
   respond: (meetingId: string, participantId: string, status: "accepted" | "rejected", reason?: string) => void;
+  /** The signed-in user accepts or rejects a task assigned to them. A reason is required to reject. */
+  respondTask: (taskId: string, status: "accepted" | "rejected", reason?: string) => void;
   resend: (meetingId: string, participantId: string) => void;
   cancelMeeting: (id: string) => void;
   saveNotes: (id: string, notes: string) => void;
@@ -48,10 +50,11 @@ const Ctx = createContext<Store | null>(null);
 const stamp = stampNow;
 const when = (m: Meeting) => `${fmtDate(m.date)}, ${fmtTime(m.start)}`;
 const firstName = (id: number) => staffById(id).name.split(" ")[0];
+const taskWhen = (t: Todo) => `${fmtDate(t.date)}${t.start ? `, ${fmtTime(t.start)}` : ""}`;
 
 // The demo has no backend, so changes are kept in this browser's localStorage.
 // Change the version when the data shape changes, so old saved data is ignored.
-const STORAGE_KEY = "msm-schedule-demo-v3";
+const STORAGE_KEY = "msm-schedule-demo-v4";
 type Saved = { me: number; items: ScheduleItem[]; notifications: AppNotification[]; simulated: boolean };
 
 function readSaved(): Saved | null {
@@ -178,18 +181,61 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             }
           }
         }
+        // Every staff member a task is assigned to gets a notification to accept or reject it.
+        if (isTodo(item)) {
+          const parent = item.parentId ? items.find((i) => i.id === item.parentId) : undefined;
+          const from = parent ? ` (follow-up from ${parent.title})` : "";
+          for (const a of item.assignees ?? []) {
+            notifyStaff(a.staffId, `${staffById(item.ownerId).name} assigned you a task: ${item.title}${from}, ${taskWhen(item)}. Accept or reject it.`, "info");
+          }
+        }
       },
       updateItem: (id, patch) =>
         setItems((all) => all.map((i) => (i.id === id ? ({ ...i, ...patch } as ScheduleItem) : i))),
       deleteItem: (id) => setItems((all) => all.filter((i) => i.id !== id)),
       toggleDone: (id) => {
-        setItems((all) =>
-          all.map((i) => (i.id === id && i.kind === "todo" ? { ...i, done: !i.done } : i)),
-        );
-        // A to-do someone else assigned (a follow-up): tell that person when it is finished.
         const t = items.find((i) => i.id === id);
-        if (t && t.kind === "todo" && !t.done && t.assignedBy && t.assignedBy !== t.ownerId && t.assignedBy !== me) {
-          notifyStaff(t.assignedBy, `${staffById(t.ownerId).name} completed ${t.title}`, "ok");
+        if (!t || !isTodo(t)) return;
+        const mine = t.ownerId !== me ? assigneeOf(t, me) : undefined;
+        if (mine) {
+          // An assignee marks their own part. The person who assigned it is told when it is done.
+          setItems((all) =>
+            all.map((i) =>
+              i.id === id && isTodo(i)
+                ? { ...i, assignees: i.assignees?.map((a) => (a.staffId === me ? { ...a, done: !a.done } : a)) }
+                : i,
+            ),
+          );
+          if (!mine.done) notifyStaff(t.ownerId, `${staffById(me).name} completed the task ${t.title}`, "ok");
+          return;
+        }
+        // The creator of an assigned task cannot tick it: the assignees do.
+        if (t.assignees?.length) return;
+        setItems((all) => all.map((i) => (i.id === id && isTodo(i) ? { ...i, done: !i.done } : i)));
+      },
+      respondTask: (taskId, status, reason) => {
+        const t = items.find((i) => i.id === taskId);
+        if (!t || !isTodo(t) || !assigneeOf(t, me)) return;
+        setItems((all) =>
+          all.map((i) =>
+            i.id === taskId && isTodo(i)
+              ? {
+                  ...i,
+                  assignees: i.assignees?.map((a) =>
+                    a.staffId === me ? { ...a, status, reason: status === "rejected" ? reason : undefined, respondedAt: stamp() } : a,
+                  ),
+                }
+              : i,
+          ),
+        );
+        const who = staffById(me).name;
+        const host = firstName(t.ownerId);
+        if (status === "accepted") {
+          notifyStaff(t.ownerId, `${who} accepted the task ${t.title}, ${taskWhen(t)}`, "ok");
+          toast("Task added to your calendar", `${t.title} · ${taskWhen(t)}. ${host} has been told.`, "ok");
+        } else {
+          notifyStaff(t.ownerId, `${who} rejected the task ${t.title}: ${reason}`, "bad");
+          toast("Task rejected", `${host} has been told your reason.`, "bad");
         }
       },
       respond: (meetingId, participantId, status, reason) => {

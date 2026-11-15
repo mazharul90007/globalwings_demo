@@ -22,11 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { staffById } from "@/lib/data";
-import { isMeeting, isTodo, myParticipant, needsWrapUp, responseSummary, staffAvailability, todoState } from "@/lib/logic";
+import { STAFF, staffById } from "@/lib/data";
+import { assigneeOf, isAssigned, isMeeting, isTodo, myParticipant, needsWrapUp, responseSummary, staffAvailability, taskProgress, todoState } from "@/lib/logic";
 import { useStore } from "@/lib/store";
 import { TODAY, addDays, fmtDate, fmtDateLong, fmtRange, fmtTime, isPast, nowMinutes, stampNow, toMin } from "@/lib/time";
-import type { Meeting, Participant, Todo } from "@/lib/types";
+import type { Meeting, Participant, Priority, TaskAssignee, Todo } from "@/lib/types";
 import { Avatar, Badge, Button, Drawer, Field, Modal, inputCls, statusLabel, statusTone } from "@/components/ui/primitives";
 import { ModeIcon } from "./EventCard";
 import { InviteePicker, busyInvitees, type Invitee } from "./InviteePicker";
@@ -53,7 +53,7 @@ export function DetailsDrawer({
       {item && isMeeting(item) && (
         <MeetingDetails key={item.id} m={item} nowMin={nowMin} onClose={onClose} onOpen={onOpen} onAnswer={onAnswer} />
       )}
-      {item && isTodo(item) && <TodoDetails key={item.id} t={item} onClose={onClose} onOpen={onOpen} />}
+      {item && isTodo(item) && <TodoDetails key={item.id} t={item} onClose={onClose} onOpen={onOpen} onAnswer={onAnswer} />}
     </Drawer>
   );
 }
@@ -271,7 +271,10 @@ function Invitees({ m, mine }: { m: Meeting; mine: boolean }) {
                   {p.staffId === meId && <span className="text-muted">(you)</span>}
                   {p.external && <span className="rounded bg-info-soft px-1 text-[10px] font-bold text-[#1d7fb6]">EXTERNAL</span>}
                 </p>
-                <p className="truncate text-[12px] text-muted">{p.email}</p>
+                <p className="truncate text-[12px] text-muted">
+                  {p.email}
+                  {p.whatsapp && ` · WhatsApp ${p.whatsapp}`}
+                </p>
               </div>
               <div className="text-right">
                 <Badge tone={statusTone(p.status)}>
@@ -302,7 +305,7 @@ function Invitees({ m, mine }: { m: Meeting; mine: boolean }) {
 }
 
 function NotesTab({ m, onOpen }: { m: Meeting; onOpen: (id: string) => void }) {
-  const { me: meId, items, saveNotes, addItem, toast, notifyStaff } = useStore();
+  const { me: meId, items, saveNotes, addItem, toast } = useStore();
   const [notes, setNotes] = useState(m.notes ?? "");
   const [adding, setAdding] = useState(false);
   const [fuTitle, setFuTitle] = useState("");
@@ -320,16 +323,14 @@ function NotesTab({ m, onOpen }: { m: Meeting; onOpen: (id: string) => void }) {
       date: fuDate,
       priority: "normal",
       done: false,
-      ownerId: fuOwner,
-      assignedBy: fuOwner === meId ? undefined : meId,
+      ownerId: meId,
+      // A follow-up for someone else is an assigned task: they accept or reject it.
+      assignees: fuOwner === meId ? undefined : [{ staffId: fuOwner, status: "pending" }],
       parentId: m.id,
     });
-    if (fuOwner !== meId) {
-      notifyStaff(fuOwner, `${staffById(meId).name} gave you a follow-up from ${m.title}: ${fuTitle.trim()}, due ${fmtDate(fuDate)}`, "info");
-    }
     toast(
       "Follow-up created",
-      fuOwner === meId ? `Added to your to-dos for ${fmtDate(fuDate)}.` : `${staffById(fuOwner).name} gets an in-app notification and a push.`,
+      fuOwner === meId ? `Added to your tasks for ${fmtDate(fuDate)}.` : `${staffById(fuOwner).name} gets a notification to accept or reject it.`,
       "ok",
     );
     setFuTitle("");
@@ -377,14 +378,27 @@ function NotesTab({ m, onOpen }: { m: Meeting; onOpen: (id: string) => void }) {
             </div>
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
-              <Button size="sm" onClick={addFollowUp} disabled={!fuTitle.trim()}>Create to-do</Button>
+              <Button size="sm" onClick={addFollowUp} disabled={!fuTitle.trim()}>Create task</Button>
             </div>
           </div>
         )}
         {followUps.length === 0 && !adding && <p className="rounded-lg bg-page p-4 text-center text-muted">No follow-ups yet.</p>}
         <ul className="space-y-1.5">
           {followUps.map((f) => {
-            const st = todoState(f);
+            const st = todoState(f, meId);
+            const a = f.assignees?.[0];
+            const who = a ? staffById(a.staffId).name : f.ownerId === meId ? "Me" : staffById(f.ownerId).name;
+            // A follow-up given to someone else shows their answer until they finish it.
+            const badge =
+              st === "done"
+                ? { tone: "ok" as const, text: "Done" }
+                : a?.status === "rejected"
+                  ? { tone: "bad" as const, text: "Rejected" }
+                  : a?.status === "pending"
+                    ? { tone: "warn" as const, text: "Waiting" }
+                    : st === "overdue"
+                      ? { tone: "bad" as const, text: "Overdue" }
+                      : { tone: "warn" as const, text: a ? "Accepted" : "Open" };
             return (
               <li key={f.id}>
                 <button
@@ -397,10 +411,10 @@ function NotesTab({ m, onOpen }: { m: Meeting; onOpen: (id: string) => void }) {
                   <span className="min-w-0 flex-1">
                     <span className={`block truncate font-medium ${st === "done" ? "text-muted line-through" : ""}`}>{f.title}</span>
                     <span className="text-[11.5px] text-muted">
-                      Due {fmtDate(f.date)} · {f.ownerId === meId ? "Me" : staffById(f.ownerId).name}
+                      Due {fmtDate(f.date)} · {who}
                     </span>
                   </span>
-                  <Badge tone={st === "done" ? "ok" : st === "overdue" ? "bad" : "warn"}>{st === "done" ? "Done" : st === "overdue" ? "Overdue" : "Open"}</Badge>
+                  <Badge tone={badge.tone}>{badge.text}</Badge>
                 </button>
               </li>
             );
@@ -513,6 +527,7 @@ function EditModal({ m, open, onClose }: { m: Meeting; open: boolean; onClose: (
           staffId: a.staffId,
           name: a.name,
           email: a.email,
+          whatsapp: a.whatsapp,
           external: !a.staffId,
           status: "pending" as const,
         })),
@@ -601,18 +616,38 @@ function EditModal({ m, open, onClose }: { m: Meeting; open: boolean; onClose: (
   );
 }
 
-function TodoDetails({ t, onClose, onOpen }: { t: Todo; onClose: () => void; onOpen: (id: string) => void }) {
-  const { me: meId, items, toggleDone, deleteItem, updateItem, toast } = useStore();
-  const st = todoState(t);
-  // The person who assigned a follow-up can open it to check progress, but only the owner can change it.
+function TodoDetails({
+  t,
+  onClose,
+  onOpen,
+  onAnswer,
+}: {
+  t: Todo;
+  onClose: () => void;
+  onOpen: (id: string) => void;
+  onAnswer: (id: string, a: "accepted" | "rejected") => void;
+}) {
+  const { me: meId, items, toggleDone, deleteItem, updateItem, toast, notifyStaff } = useStore();
+  const st = todoState(t, meId);
   const owner = t.ownerId === meId;
+  const assigned = isAssigned(t);
+  const myPart = owner ? undefined : assigneeOf(t, meId);
+  const pending = myPart?.status === "pending";
+  // Only the person who does the work can tick it: the creator of a task for themselves, or an assignee who accepted.
+  const canTick = (owner && !assigned) || myPart?.status === "accepted";
+  const p = taskProgress(t);
   const parent = t.parentId ? items.find((i) => i.id === t.parentId) : undefined;
+  const ownerName = staffById(t.ownerId).name;
+  const [edit, setEdit] = useState(false);
+
   return (
     <>
-      <Header onClose={onClose} tone={st === "done" ? "ok" : st === "overdue" ? "bad" : "warn"}>
-        <div className="mb-2 flex items-center gap-2">
-          <span className="rounded-md bg-white/60 px-2 py-0.5 text-[11.5px] font-semibold">To-do</span>
-          <span className="rounded-md bg-white/60 px-2 py-0.5 text-[11.5px] font-semibold">{st === "done" ? "Done" : st === "overdue" ? "Overdue" : "Open"}</span>
+      <Header onClose={onClose} tone={pending ? "brand" : st === "done" ? "ok" : st === "overdue" ? "bad" : "warn"}>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className={`rounded-md px-2 py-0.5 text-[11.5px] font-semibold ${pending ? "bg-white/20" : "bg-white/60"}`}>Task</span>
+          <span className={`rounded-md px-2 py-0.5 text-[11.5px] font-semibold ${pending ? "bg-white/20" : "bg-white/60"}`}>
+            {pending ? "Waiting for your answer" : st === "done" ? "Done" : st === "overdue" ? "Overdue" : "Open"}
+          </span>
           {t.priority === "high" && (
             <span className="flex items-center gap-1 rounded-md bg-bad px-2 py-0.5 text-[11.5px] font-semibold text-white">
               <Flag className="h-3 w-3" /> High priority
@@ -622,16 +657,33 @@ function TodoDetails({ t, onClose, onOpen }: { t: Todo; onClose: () => void; onO
         <h2 className={`pr-10 text-[20px] font-bold leading-tight ${st === "done" ? "line-through opacity-70" : ""}`}>{t.title}</h2>
         <div className="mt-3 grid gap-1.5 text-[13px]">
           <p className="flex items-center gap-2"><CalendarDays className="h-4 w-4" /> {fmtDateLong(t.date)}</p>
-          <p className="flex items-center gap-2"><Clock className="h-4 w-4" /> {t.start && t.end ? fmtRange(t.start, t.end) : "No set time · in the day's to-do list"}</p>
-          {t.assignedBy && t.assignedBy !== t.ownerId && (
+          <p className="flex items-center gap-2"><Clock className="h-4 w-4" /> {t.start && t.end ? fmtRange(t.start, t.end) : "No set time · in the day's task list"}</p>
+          {!owner && (
             <p className="flex items-center gap-2">
-              <UserCheck className="h-4 w-4" /> Assigned by {staffById(t.assignedBy).name}
-              {t.assignedBy === meId && <> to {staffById(t.ownerId).name}</>}
+              <UserCheck className="h-4 w-4" /> Assigned by {ownerName}
             </p>
           )}
         </div>
       </Header>
-      <div className="flex-1 space-y-4 overflow-y-auto p-5">
+
+      <div className="flex-1 space-y-4 overflow-y-auto p-5 scrollbar-thin">
+        {/* Assigned to me and not answered yet */}
+        {pending && (
+          <div className="rounded-xl border border-brand/30 bg-brand-soft/50 p-4">
+            <p className="mb-3 text-[13px]">
+              <b>{ownerName}</b> assigned you this task. Accept it to add it to your calendar, or reject it with a reason.
+            </p>
+            <div className="flex gap-2">
+              <Button variant="ok" className="flex-1" onClick={() => onAnswer(t.id, "accepted")}>
+                <Check className="h-4 w-4" /> Accept
+              </Button>
+              <Button variant="bad-ghost" className="flex-1 ring-1 ring-bad/40" onClick={() => onAnswer(t.id, "rejected")}>
+                <X className="h-4 w-4" /> Reject
+              </Button>
+            </div>
+          </div>
+        )}
+
         {parent && isMeeting(parent) && (
           <button onClick={() => onOpen(parent.id)} className="flex w-full items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/40 p-3 text-left hover:bg-brand-soft">
             <Link2 className="h-4 w-4 text-brand" />
@@ -642,57 +694,296 @@ function TodoDetails({ t, onClose, onOpen }: { t: Todo; onClose: () => void; onO
           </button>
         )}
         {t.notes && <p className="whitespace-pre-line rounded-lg bg-page p-3">{t.notes}</p>}
-        {!owner && (
-          <p className={`rounded-xl p-3 text-center text-[13px] ${st === "done" ? "bg-ok-soft text-[#067a6a]" : st === "overdue" ? "bg-bad-soft text-[#b33b22]" : "bg-page text-muted"}`}>
-            {st === "done"
-              ? `${staffById(t.ownerId).name} has completed this follow-up.`
-              : `${staffById(t.ownerId).name} has not finished this yet${st === "overdue" ? " and it is overdue" : ""}. You get a notification when it is done.`}
-          </p>
+
+        {/* Who it is assigned to */}
+        {assigned && (
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[12.5px] font-semibold text-[#495057]">Assigned to ({p.total})</p>
+              <p className="text-[12px] text-muted">
+                {p.accepted} accepted · {p.pending} waiting{p.rejected ? ` · ${p.rejected} rejected` : ""}
+              </p>
+            </div>
+            <ul className="space-y-1.5">
+              {t.assignees!.map((a) => {
+                const s = staffById(a.staffId);
+                const label = a.status === "accepted" ? (a.done ? "Done" : "Accepted") : a.status === "rejected" ? "Rejected" : "Waiting";
+                const tone = a.status === "accepted" ? "ok" : a.status === "rejected" ? "bad" : "warn";
+                return (
+                  <li key={a.staffId} className="rounded-lg border border-line px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={s.name} color={s.color} size={30} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium">
+                          {s.name}
+                          {a.staffId === meId && <span className="text-muted"> (you)</span>}
+                        </span>
+                        <span className="text-[11.5px] text-muted">
+                          {s.role}
+                          {a.respondedAt && ` · answered ${a.respondedAt}`}
+                        </span>
+                      </span>
+                      <Badge tone={tone}>{label}</Badge>
+                    </div>
+                    {a.status === "rejected" && a.reason && (
+                      <p className="mt-2 rounded-lg bg-bad-soft px-3 py-2 text-[12.5px] text-[#a8361e]">Reason: {a.reason}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {owner && (
+              <p className="mt-2 text-[12px] text-muted">You get a notification when someone accepts, rejects or finishes this task.</p>
+            )}
+          </div>
         )}
-        {owner && <>
-        <button
-          onClick={() => {
-            toggleDone(t.id);
-            if (!t.done) toast("Nice work!", `${t.title} is done.`, "ok");
-          }}
-          className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold transition ${
-            t.done ? "bg-page text-muted hover:text-ink" : "bg-ok text-white shadow-md shadow-ok/30 hover:bg-[#099885]"
-          }`}
-        >
-          <Check className="h-5 w-5" /> {t.done ? "Mark as not done" : "Mark as done"}
-        </button>
-        {st === "overdue" && (
+
+        {canTick && (
+          <>
+            <button
+              onClick={() => {
+                toggleDone(t.id);
+                if (st !== "done") toast("Nice work!", `${t.title} is done.${owner ? "" : ` ${ownerName.split(" ")[0]} has been told.`}`, "ok");
+              }}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold transition ${
+                st === "done" ? "bg-page text-muted hover:text-ink" : "bg-ok text-white shadow-md shadow-ok/30 hover:bg-[#099885]"
+              }`}
+            >
+              <Check className="h-5 w-5" /> {st === "done" ? "Mark as not done" : "Mark as done"}
+            </button>
+            {owner && st === "overdue" && (
+              <Button
+                variant="soft"
+                className="w-full"
+                onClick={() => {
+                  updateItem(t.id, { date: TODAY });
+                  toast("Moved to today", undefined, "info");
+                }}
+              >
+                <CalendarClock className="h-4 w-4" /> Move to today
+              </Button>
+            )}
+            <p className="text-center text-[12px] text-muted">
+              {t.start ? "You get a push at the start time." : "Without a time, this task does not block your calendar."}
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="flex items-center border-t border-line bg-[#fafbfc] px-5 py-3.5">
+        {owner && (
           <Button
-            variant="soft"
-            className="w-full"
+            variant="bad-ghost"
             onClick={() => {
-              updateItem(t.id, { date: TODAY });
-              toast("Moved to today", undefined, "info");
+              deleteItem(t.id);
+              // Staff who still have the task are told it was removed.
+              for (const a of t.assignees ?? []) {
+                if (a.status !== "rejected") notifyStaff(a.staffId, `${ownerName} deleted the task ${t.title}`, "bad");
+              }
+              toast("Task deleted", assigned ? "The assigned staff have been told." : undefined, "bad");
+              onClose();
             }}
           >
-            <CalendarClock className="h-4 w-4" /> Move to today
+            <Trash2 className="h-4 w-4" /> Delete
           </Button>
         )}
-        <p className="text-center text-[12px] text-muted">
-          {t.start ? "You get a push at the start time." : "Without a time, this to-do does not block your calendar."}
-        </p>
-        </>}
-      </div>
-      {owner && <div className="flex border-t border-line bg-[#fafbfc] px-5 py-3.5">
-        <Button
-          variant="bad-ghost"
-          onClick={() => {
-            deleteItem(t.id);
-            toast("To-do deleted", undefined, "bad");
-            onClose();
-          }}
-        >
-          <Trash2 className="h-4 w-4" /> Delete
-        </Button>
+        {owner && (
+          <Button variant="ghost" onClick={() => setEdit(true)}>
+            <Pencil className="h-4 w-4" /> Edit
+          </Button>
+        )}
         <span className="ml-auto self-center text-[12px] text-muted">
-          {t.assignedBy && t.assignedBy !== t.ownerId ? `Shared with ${staffById(t.assignedBy).name.split(" ")[0]}` : "Private to you"}
+          {owner
+            ? assigned
+              ? `Assigned to ${p.total} staff`
+              : "Private to you"
+            : `From ${ownerName.split(" ")[0]}`}
         </span>
-      </div>}
+      </div>
+      {owner && edit && <EditTaskModal t={t} onClose={() => setEdit(false)} />}
     </>
+  );
+}
+
+/**
+ * Edit a task: title, date and time, priority, notes and the assigned staff.
+ * New staff get the task to accept or reject. Removed staff and staff who keep the task are told.
+ */
+function EditTaskModal({ t, onClose }: { t: Todo; onClose: () => void }) {
+  const { me: meId, items, updateItem, toast, notifyStaff } = useStore();
+  const [title, setTitle] = useState(t.title);
+  const [date, setDate] = useState(t.date);
+  const [hasTime, setHasTime] = useState(!!t.start);
+  const [start, setStart] = useState(t.start ?? "10:00");
+  const [end, setEnd] = useState(t.end ?? "11:00");
+  const [priority, setPriority] = useState<Priority>(t.priority);
+  const [notes, setNotes] = useState(t.notes ?? "");
+  const [kept, setKept] = useState<TaskAssignee[]>(t.assignees ?? []);
+  const [added, setAdded] = useState<Invitee[]>([]);
+
+  const timeOk = !hasTime || !timeError(start, end);
+  const newStart = hasTime ? start : undefined;
+  const newEnd = hasTime ? end : undefined;
+  const timeChanged = date !== t.date || newStart !== t.start || newEnd !== t.end;
+  const removed = (t.assignees ?? []).filter((a) => !kept.some((k) => k.staffId === a.staffId));
+
+  // Leave this task out, so its own staff do not show as busy because of it.
+  const availability = useMemo(
+    () =>
+      hasTime && timeOk
+        ? staffAvailability(date, start, end, items, meId, t.id)
+        : STAFF.filter((s) => s.id !== meId).map((s) => ({ staff: s, busy: null as string | null, busyAt: null })),
+    [hasTime, timeOk, date, start, end, items, meId, t.id],
+  );
+
+  const save = () => {
+    if (!title.trim() || !timeOk) return;
+    const assignees = [...kept, ...added.map((a) => ({ staffId: a.staffId!, status: "pending" as const }))];
+    updateItem(t.id, {
+      title: title.trim(),
+      date,
+      start: newStart,
+      end: newEnd,
+      priority,
+      notes: notes.trim() || undefined,
+      assignees: assignees.length ? assignees : undefined,
+    });
+
+    const me = staffById(meId).name;
+    const when = `${fmtDate(date)}${newStart ? `, ${fmtTime(newStart)}` : ""}`;
+    for (const a of added) {
+      notifyStaff(a.staffId!, `${me} assigned you a task: ${title.trim()}, ${when}. Accept or reject it.`, "info");
+    }
+    for (const a of removed) {
+      if (a.status !== "rejected") notifyStaff(a.staffId, `${me} removed you from the task ${t.title}`, "bad");
+    }
+    for (const a of kept) {
+      if (a.status === "rejected") continue;
+      notifyStaff(
+        a.staffId,
+        timeChanged ? `${me} moved the task ${title.trim()} to ${when}` : `${me} updated the task ${title.trim()}`,
+        "info",
+      );
+    }
+
+    const parts = [
+      added.length && `sent to ${added.map((a) => a.name.split(" ")[0]).join(", ")}`,
+      removed.length && `${removed.map((a) => staffById(a.staffId).name.split(" ")[0]).join(", ")} removed`,
+    ].filter(Boolean);
+    toast("Task updated", parts.length ? `Task ${parts.join(", ")}. Everyone involved has been told.` : undefined, "ok");
+    onClose();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Edit task" width={520}>
+      <div className="space-y-3.5">
+        <Field label="Title">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
+        </Field>
+        <TimeFields
+          date={date}
+          start={start}
+          end={end}
+          onDate={setDate}
+          onTime={(s, e) => {
+            setStart(s);
+            setEnd(e);
+          }}
+          showTime={hasTime}
+        />
+        <label className="flex items-center gap-2 text-[13px]">
+          <input type="checkbox" checked={hasTime} onChange={(e) => setHasTime(e.target.checked)} className="h-4 w-4 accent-brand" />
+          Set a time <span className="text-muted">(blocks the calendar)</span>
+        </label>
+
+        <div>
+          <p className="mb-1.5 text-[12.5px] font-semibold text-[#495057]">Priority</p>
+          <div className="flex rounded-lg bg-page p-1">
+            {(["low", "normal", "high"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setPriority(v)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] font-semibold capitalize transition ${
+                  priority === v ? "bg-white text-brand shadow-sm" : "text-muted hover:text-ink"
+                }`}
+              >
+                {v === "high" && <Flag className="h-4 w-4" />}
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Field label="Notes">
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={`${inputCls} h-auto py-2`} />
+        </Field>
+
+        {/* Assigned staff */}
+        <div className="rounded-xl border border-line p-3.5">
+          <p className="mb-2 text-[12.5px] font-semibold text-[#495057]">Assigned to</p>
+          {kept.length > 0 ? (
+            <ul className="mb-3 space-y-1.5">
+              {kept.map((a) => {
+                const s = staffById(a.staffId);
+                const label = a.status === "accepted" ? (a.done ? "Done" : "Accepted") : a.status === "rejected" ? "Rejected" : "Waiting";
+                return (
+                  <li key={a.staffId} className="flex items-center gap-2.5 rounded-lg bg-page px-2.5 py-1.5">
+                    <Avatar name={s.name} color={s.color} size={26} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium">{s.name}</span>
+                      <span className="text-[11.5px] text-muted">{s.role}</span>
+                    </span>
+                    <Badge tone={a.status === "accepted" ? "ok" : a.status === "rejected" ? "bad" : "warn"}>{label}</Badge>
+                    <button
+                      type="button"
+                      onClick={() => setKept((k) => k.filter((x) => x.staffId !== a.staffId))}
+                      className="rounded-md p-1 text-muted hover:bg-bad-soft hover:text-bad"
+                      aria-label={`Remove ${s.name}`}
+                      title={`Remove ${s.name}`}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            added.length === 0 && <p className="mb-3 text-[12.5px] text-muted">Nobody yet. The task is only for you.</p>
+          )}
+          <InviteePicker
+            value={added}
+            onChange={setAdded}
+            availability={availability}
+            taken={kept.map((a) => ({ staffId: a.staffId, email: "" }))}
+            timeOk={timeOk}
+            showExternal={false}
+            allowBusy
+            staffLabel="Add staff"
+          />
+        </div>
+
+        {(added.length > 0 || removed.length > 0 || (timeChanged && kept.length > 0)) && (
+          <div className="flex gap-2 rounded-lg bg-warn-soft px-3 py-2.5 text-[12.5px] text-[#7a5205]">
+            <CalendarClock className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              {[
+                added.length > 0 && `${added.map((a) => a.name.split(" ")[0]).join(", ")} will get the task to accept or reject.`,
+                removed.length > 0 && `${removed.map((a) => staffById(a.staffId).name.split(" ")[0]).join(", ")} will be removed and told.`,
+                timeChanged && kept.length > 0 && "Staff who keep the task are told about the new date and time.",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button onClick={save} disabled={!title.trim() || !timeOk}>
+          {kept.length || added.length || removed.length ? "Save and notify" : "Save"}
+        </Button>
+      </div>
+    </Modal>
   );
 }

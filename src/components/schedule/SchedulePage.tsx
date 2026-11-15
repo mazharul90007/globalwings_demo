@@ -2,7 +2,8 @@
 
 import { CalendarCheck2, ChevronLeft, ChevronRight, ListTodo, Plus, RotateCcw, TriangleAlert, Users } from "lucide-react";
 import { useMemo, useState } from "react";
-import { busyReason, isMeeting, myParticipant, visibleForMe } from "@/lib/logic";
+import { assigneeOf, busyReason, isAssigned, isMeeting, isTodo, myParticipant, taskDone, visibleForMe } from "@/lib/logic";
+import { staffById } from "@/lib/data";
 import { useStore } from "@/lib/store";
 import {
   LAST_MIN,
@@ -44,7 +45,7 @@ export function SchedulePage() {
 }
 
 function ScheduleView() {
-  const { me: meId, items, elapsed, toggleDone, respond, addItem, toast, resetDemo } = useStore();
+  const { me: meId, items, elapsed, toggleDone, respond, respondTask, addItem, toast, resetDemo } = useStore();
   const [view, setView] = useState<View>("week");
   const [anchor, setAnchor] = useState(TODAY);
   const [filter, setFilter] = useState<Filter>("all");
@@ -71,25 +72,47 @@ function ScheduleView() {
 
   const toggle = (id: string) => {
     const t = items.find((i) => i.id === id);
+    if (!t || !isTodo(t)) return;
+    if (t.ownerId === meId && isAssigned(t)) {
+      return toast("Only the assigned staff can tick this", "You get a notification as each of them finishes.", "info");
+    }
     toggleDone(id);
-    if (t && t.kind === "todo" && !t.done) toast("Nice work!", `${t.title} is done.`, "ok");
+    if (!taskDone(t, meId)) toast("Nice work!", `${t.title} is done.`, "ok");
+  };
+
+  const accept = (id: string) => {
+    const it = items.find((i) => i.id === id);
+    if (!it) return;
+    if (isMeeting(it)) respond(id, myParticipant(it, meId)!.id, "accepted");
+    else respondTask(id, "accepted");
   };
 
   // Accept checks for a clash with my own calendar first. Reject asks for a reason.
   const requestAnswer = (id: string, a: "accepted" | "rejected") => {
-    const m = items.find((i) => i.id === id);
-    if (!m || !isMeeting(m)) return;
+    const it = items.find((i) => i.id === id);
+    if (!it) return;
+    const valid = isMeeting(it) ? !!myParticipant(it, meId) : !!assigneeOf(it, meId);
+    if (!valid) return;
     if (a === "accepted") {
-      const clash = busyReason(meId, m.date, m.start, m.end, items.filter((i) => !(isMeeting(i) && i.organizerId !== meId && myParticipant(i, meId)?.status === "pending")), m.id);
+      // Things I have not answered yet are not on my calendar, so they do not clash.
+      const answered = items.filter(
+        (i) =>
+          !(isMeeting(i) && i.organizerId !== meId && myParticipant(i, meId)?.status === "pending") &&
+          !(isTodo(i) && assigneeOf(i, meId)?.status === "pending"),
+      );
+      const clash = it.start && it.end ? busyReason(meId, it.date, it.start, it.end, answered, it.id) : null;
       if (clash) return setAnswer({ id, a, clash });
-      respond(id, myParticipant(m, meId)!.id, "accepted");
+      accept(id);
       return;
     }
     setReason("");
     setAnswer({ id, a });
   };
 
-  const answerMeeting = answer ? items.find((i) => i.id === answer.id) : undefined;
+  const answerItem = answer ? items.find((i) => i.id === answer.id) : undefined;
+  const answerIsTask = !!answerItem && isTodo(answerItem);
+  // A task cannot be rejected without a reason. For meetings the reason is optional.
+  const reasonMissing = answerIsTask && !reason.trim();
 
   return (
     <AppShell
@@ -100,7 +123,7 @@ function ScheduleView() {
           <ScheduleTabs />
           <Button
             variant="ghost"
-            onClick={() => window.confirm("Reset the demo? Every meeting and to-do you added or changed in this browser will be cleared.") && resetDemo()}
+            onClick={() => window.confirm("Reset the demo? Every meeting and task you added or changed in this browser will be cleared.") && resetDemo()}
             title="Clear saved changes and go back to the original dummy data"
           >
             <RotateCcw className="h-4 w-4" /> Reset demo
@@ -116,7 +139,7 @@ function ScheduleView() {
         <div className="hidden space-y-4 min-[1700px]:block">
           <Card className="p-4">
             <Button className="mb-4 w-full" onClick={() => setCreate({ kind: "meeting", date: anchor, start: "14:00" })}>
-              <Plus className="h-4 w-4" /> New meeting or to-do
+              <Plus className="h-4 w-4" /> New meeting or task
             </Button>
             <MiniCalendar
               selected={anchor}
@@ -133,9 +156,9 @@ function ScheduleView() {
             <ul className="space-y-2.5 text-[13px]">
               <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded bg-brand" /> Meeting</li>
               <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-2 border-dashed border-brand/60" /> Invite waiting for your answer</li>
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-warn bg-warn-soft" /> To-do</li>
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-ok bg-ok-soft" /> To-do done</li>
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-bad bg-bad-soft" /> To-do overdue</li>
+              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-warn bg-warn-soft" /> Task</li>
+              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-ok bg-ok-soft" /> Task done</li>
+              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-bad bg-bad-soft" /> Task overdue</li>
               <li className="flex items-center gap-2.5"><span className="striped-bg h-3.5 w-3.5 rounded border border-[#d5d9e6]" /> Cancelled</li>
             </ul>
           </Card>
@@ -160,7 +183,7 @@ function ScheduleView() {
                 {([
                   ["all", "All", CalendarCheck2],
                   ["meeting", "Meetings", Users],
-                  ["todo", "To-dos", ListTodo],
+                  ["todo", "Tasks", ListTodo],
                 ] as const).map(([v, l, Icon]) => (
                   <button
                     key={v}
@@ -237,7 +260,7 @@ function ScheduleView() {
               done: false,
               ownerId: meId,
             });
-            toast("To-do added", `${title} · ${fmtDate(quick.date)}, ${fmtTime(quick.start)}`, "ok");
+            toast("Task added", `${title} · ${fmtDate(quick.date)}, ${fmtTime(quick.start)}`, "ok");
             setQuick(null);
           }}
         />
@@ -248,13 +271,13 @@ function ScheduleView() {
 
       {/* Clash warning on accept */}
       <Modal open={!!answer && answer.a === "accepted"} onClose={() => setAnswer(null)} title="You already have something at this time">
-        {answerMeeting && isMeeting(answerMeeting) && (
+        {answerItem && answerItem.start && answerItem.end && (
           <>
             <div className="flex gap-3 rounded-lg bg-warn-soft p-3 text-[#7a5205]">
               <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" />
               <p>
-                You have <b>{answer?.clash}</b> at this time. <b>{answerMeeting.title}</b> is {fmtDate(answerMeeting.date)},{" "}
-                {fmtRange(answerMeeting.start, answerMeeting.end)}.
+                You have <b>{answer?.clash}</b> at this time. <b>{answerItem.title}</b> is {fmtDate(answerItem.date)},{" "}
+                {fmtRange(answerItem.start, answerItem.end)}.
               </p>
             </div>
             <div className="mt-5 flex justify-end gap-2">
@@ -262,7 +285,7 @@ function ScheduleView() {
               <Button
                 variant="ok"
                 onClick={() => {
-                  respond(answerMeeting.id, myParticipant(answerMeeting, meId)!.id, "accepted");
+                  accept(answerItem.id);
                   setAnswer(null);
                 }}
               >
@@ -274,26 +297,40 @@ function ScheduleView() {
       </Modal>
 
       {/* Reject with reason */}
-      <Modal open={!!answer && answer.a === "rejected"} onClose={() => setAnswer(null)} title="Reject this invite?">
-        {answerMeeting && isMeeting(answerMeeting) && (
+      <Modal open={!!answer && answer.a === "rejected"} onClose={() => setAnswer(null)} title={answerIsTask ? "Reject this task?" : "Reject this invite?"}>
+        {answerItem && (
           <>
             <p className="mb-3 text-muted">
-              {answerMeeting.title} · {fmtDate(answerMeeting.date)}, {fmtTime(answerMeeting.start)}
+              {answerItem.title} · {fmtDate(answerItem.date)}
+              {answerItem.start ? `, ${fmtTime(answerItem.start)}` : ""}
             </p>
-            <label className="mb-1.5 block text-[12.5px] font-semibold text-[#495057]">Reason (optional)</label>
+            <label className="mb-1.5 block text-[12.5px] font-semibold text-[#495057]">
+              {answerIsTask ? (
+                <>Reason <span className="text-bad">*</span></>
+              ) : (
+                "Reason (optional)"
+              )}
+            </label>
             <textarea
+              autoFocus={answerIsTask}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               rows={3}
-              placeholder="e.g. I have a student visit at this time"
+              placeholder={answerIsTask ? "e.g. I am on a student visit all day. Please ask Nusrat." : "e.g. I have a student visit at this time"}
               className={`${inputCls} h-auto py-2`}
             />
+            {isTodo(answerItem) && (
+              <p className="mt-1.5 text-[12px] text-muted">Required. {staffById(answerItem.ownerId).name.split(" ")[0]} sees this reason.</p>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setAnswer(null)}>Go back</Button>
               <Button
                 variant="bad"
+                disabled={reasonMissing}
                 onClick={() => {
-                  respond(answerMeeting.id, myParticipant(answerMeeting, meId)!.id, "rejected", reason.trim() || undefined);
+                  if (reasonMissing) return;
+                  if (isMeeting(answerItem)) respond(answerItem.id, myParticipant(answerItem, meId)!.id, "rejected", reason.trim() || undefined);
+                  else respondTask(answerItem.id, "rejected", reason.trim());
                   setAnswer(null);
                   setOpenId(null);
                 }}
@@ -349,7 +386,7 @@ function QuickAdd({
               }`}
             >
               {k === "meeting" ? <Users className="h-3.5 w-3.5" /> : <ListTodo className="h-3.5 w-3.5" />}
-              {k === "meeting" ? "Meeting" : "To-do"}
+              {k === "meeting" ? "Meeting" : "Task"}
             </button>
           ))}
         </div>

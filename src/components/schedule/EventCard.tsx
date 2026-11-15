@@ -1,9 +1,9 @@
 "use client";
 
-import { Check, Flag, Link2, MapPin, NotebookPen, Phone, Video, X } from "lucide-react";
+import { Check, Flag, Link2, MapPin, NotebookPen, Phone, UserPlus, Video, X } from "lucide-react";
 import { staffById } from "@/lib/data";
 import { useStore } from "@/lib/store";
-import { isMeeting, myParticipant, needsWrapUp, responseSummary, todoState } from "@/lib/logic";
+import { isAssigned, isMeeting, myParticipant, needsWrapUp, responseSummary, taskProgress, todoState } from "@/lib/logic";
 import { fmtRange, fmtTime, isPast } from "@/lib/time";
 import type { Meeting, ScheduleItem, Todo } from "@/lib/types";
 import { Avatar } from "@/components/ui/primitives";
@@ -140,8 +140,18 @@ function MeetingCard({ m, height, nowMin, onAnswer }: { m: Meeting; height: numb
   );
 }
 
+/** Short line about who a task is shared with: "From Farhan", or "1 of 2 accepted" for the creator. */
+function taskShareLine(t: Todo, meId: number) {
+  if (t.ownerId !== meId) return `From ${staffById(t.ownerId).name.split(" ")[0]}`;
+  if (!isAssigned(t)) return null;
+  const p = taskProgress(t);
+  return p.accepted ? `${p.done} of ${p.accepted} done` : `${p.pending} waiting`;
+}
+
 function TodoCard({ t, height, onToggle }: { t: Todo; height: number; onToggle: () => void }) {
-  const state = todoState(t);
+  const { me: meId } = useStore();
+  const state = todoState(t, meId);
+  const share = taskShareLine(t, meId);
   const style =
     state === "done"
       ? "bg-ok-soft border-ok text-[#067a6a]"
@@ -169,7 +179,8 @@ function TodoCard({ t, height, onToggle }: { t: Todo; height: number; onToggle: 
         </p>
         {height >= 44 && (
           <p className="flex items-center gap-1 truncate text-[11px] opacity-80">
-            {state === "overdue" ? "Overdue" : t.start ? fmtTime(t.start) : "To-do"}
+            {state === "overdue" ? "Overdue" : t.start ? fmtTime(t.start) : "Task"}
+            {share && <span className="flex min-w-0 items-center gap-0.5 truncate"><UserPlus className="h-3 w-3 shrink-0" /> {share}</span>}
             {t.priority === "high" && state !== "done" && <Flag className="h-3 w-3 fill-bad text-bad" />}
           </p>
         )}
@@ -218,7 +229,7 @@ export function EventChip({ item, onToggle }: { item: ScheduleItem; onToggle: ()
       </div>
     );
   }
-  const state = todoState(item);
+  const state = todoState(item, meId);
   return (
     <div
       className={`flex items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-[11.5px] font-semibold ${
@@ -238,6 +249,7 @@ export function EventChip({ item, onToggle }: { item: ScheduleItem; onToggle: ()
         {state === "done" && <Check className="h-2 w-2" strokeWidth={3} />}
       </button>
       {item.parentId && <Link2 className="h-3 w-3 shrink-0" />}
+      {(isAssigned(item) || item.ownerId !== meId) && <UserPlus className="h-3 w-3 shrink-0 opacity-70" />}
       <span className={`truncate ${state === "done" ? "line-through opacity-70" : ""}`}>{item.title}</span>
     </div>
   );

@@ -100,9 +100,9 @@ export function TimeGrid({
         })}
       </div>
 
-      {/* Untimed to-dos */}
+      {/* Untimed tasks */}
       <div className="grid border-b border-line bg-[#fafbfc]" style={{ gridTemplateColumns: cols }}>
-        <div className="flex items-center justify-end pr-2 text-[10.5px] font-semibold uppercase text-muted">To-do</div>
+        <div className="flex items-center justify-end pr-2 text-[10.5px] font-semibold uppercase text-muted">Task</div>
         {days.map((d) => {
           const list = items.filter((i) => i.date === d && !i.start);
           return (

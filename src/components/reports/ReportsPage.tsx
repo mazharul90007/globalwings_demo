@@ -36,7 +36,7 @@ export function ReportsPage() {
 
   const exportCsv = () => {
     const rows = [
-      "Staff,Meetings organized,Meetings attended,To-dos on time %",
+      "Staff,Meetings organized,Meetings attended,Tasks on time %",
       ...REPORT.perStaff.map((r) => {
         const t = REPORT.todosOnTime.find((x) => x.staffId === r.staffId)!;
         return `${staffById(r.staffId).name},${Math.round(r.organized * k)},${Math.round(r.attended * k)},${t.pct}`;
@@ -210,9 +210,9 @@ export function ReportsPage() {
           <Heatmap />
         </Card>
 
-        {/* To-dos on time */}
+        {/* Tasks on time */}
         <Card className="p-5">
-          <Title title="To-dos completed on time" sub="Marked Done by the end of their day" />
+          <Title title="Tasks completed on time" sub="Marked Done by the end of their day" />
           <ul className="space-y-3">
             {todos.map((t) => {
               const s = staffById(t.staffId);

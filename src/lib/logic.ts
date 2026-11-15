@@ -1,6 +1,6 @@
 import { STAFF } from "./data";
 import { TODAY, isPast, overlaps } from "./time";
-import type { Meeting, Participant, ScheduleItem, Todo } from "./types";
+import type { Meeting, Participant, ScheduleItem, TaskAssignee, Todo } from "./types";
 
 export const isMeeting = (i: ScheduleItem): i is Meeting => i.kind === "meeting";
 export const isTodo = (i: ScheduleItem): i is Todo => i.kind === "todo";
@@ -11,10 +11,50 @@ export function myParticipant(m: Meeting, me: number): Participant | undefined {
   return m.participants.find((p) => p.staffId === me);
 }
 
+/** My entry on a task someone assigned to me. */
+export function assigneeOf(t: Todo, me: number): TaskAssignee | undefined {
+  return t.assignees?.find((a) => a.staffId === me);
+}
+
+/** True when the task was given to other staff (not only for the creator). */
+export const isAssigned = (t: Todo) => !!t.assignees?.length;
+
+/** Tasks other people assigned to me that I have not answered yet. */
+export function pendingTasksFor(items: ScheduleItem[], me: number) {
+  return items.filter((i): i is Todo => isTodo(i) && i.ownerId !== me && assigneeOf(i, me)?.status === "pending");
+}
+
+export function taskProgress(t: Todo) {
+  const list = t.assignees ?? [];
+  const accepted = list.filter((a) => a.status === "accepted");
+  return {
+    total: list.length,
+    pending: list.filter((a) => a.status === "pending").length,
+    rejected: list.filter((a) => a.status === "rejected").length,
+    accepted: accepted.length,
+    done: accepted.filter((a) => a.done).length,
+  };
+}
+
+/**
+ * Done from my side. An assignee sees their own part. The creator of an assigned task
+ * sees it done once every staff member who accepted has finished.
+ */
+export function taskDone(t: Todo, me: number) {
+  const mine = assigneeOf(t, me);
+  if (mine && t.ownerId !== me) return !!mine.done;
+  if (isAssigned(t)) {
+    const p = taskProgress(t);
+    return p.accepted > 0 && p.done === p.accepted;
+  }
+  return t.done;
+}
+
 /** Items that appear on my calendar. */
 export function visibleForMe(items: ScheduleItem[], me: number) {
   return items.filter((i) => {
-    if (isTodo(i)) return i.ownerId === me;
+    // An assigned task goes on my calendar only after I accept it.
+    if (isTodo(i)) return i.ownerId === me || assigneeOf(i, me)?.status === "accepted";
     if (i.organizerId === me) return true;
     const p = myParticipant(i, me);
     // Invites I rejected and meetings cancelled by the host leave my calendar.
@@ -22,8 +62,8 @@ export function visibleForMe(items: ScheduleItem[], me: number) {
   });
 }
 
-export function todoState(t: Todo): "done" | "overdue" | "open" {
-  if (t.done) return "done";
+export function todoState(t: Todo, me: number): "done" | "overdue" | "open" {
+  if (taskDone(t, me)) return "done";
   if (t.date < TODAY) return "overdue";
   return "open";
 }
@@ -46,7 +86,8 @@ export type BusyBlock = { title: string; start: string; end: string };
 
 /**
  * The first item that blocks a staff member's time in the given range: meetings they
- * organize, accept or have not answered yet, and timed to-dos. Null when they are free.
+ * organize, accept or have not answered yet, and timed tasks that are theirs to do
+ * (their own tasks, or assigned tasks they accepted). Null when they are free.
  */
 export function busyBlock(
   staffId: number,
@@ -59,7 +100,9 @@ export function busyBlock(
   for (const i of items) {
     if (i.id === excludeId || i.date !== date) continue;
     if (isTodo(i)) {
-      if (i.ownerId === staffId && i.start && i.end && !i.done && overlaps(start, end, i.start, i.end)) {
+      const a = assigneeOf(i, staffId);
+      const doing = a ? a.status === "accepted" && !a.done : i.ownerId === staffId && !isAssigned(i) && !i.done;
+      if (doing && i.start && i.end && overlaps(start, end, i.start, i.end)) {
         return { title: i.title, start: i.start, end: i.end };
       }
       continue;

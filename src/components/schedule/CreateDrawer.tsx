@@ -10,11 +10,13 @@ import {
   Paperclip,
   Phone,
   Send,
+  UserPlus,
   Users,
   Video,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { STAFF, staffById } from "@/lib/data";
 import { staffAvailability } from "@/lib/logic";
 import { useStore } from "@/lib/store";
 import { LAST_MIN, fmtDate, keepInFuture, nowMinutes, stampNow, fmtTime, fromMin, toMin } from "@/lib/time";
@@ -86,12 +88,13 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
   const [agenda, setAgenda] = useState("");
   const [deadline, setDeadline] = useState("");
   const [invitees, setInvitees] = useState<Invitee[]>([]);
-  // to-do
-  const [hasTime, setHasTime] = useState(true);
+  // task
+  const [hasTime, setHasTime] = useState(false);
   const [priority, setPriority] = useState<Priority>("normal");
   const [notes, setNotes] = useState("");
+  const [assignees, setAssignees] = useState<Invitee[]>([]);
 
-  // Meetings cannot be booked in the past; to-dos can (for logging work already done).
+  // Meetings cannot be booked in the past; tasks can (for logging work already done).
   const timeOk = !timeError(start, end);
   // The "time has passed" check runs only when the user saves a meeting.
   const [saveError, setSaveError] = useState("");
@@ -100,6 +103,14 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
     [timeOk, date, start, end, items, meId],
   );
   const busyChosen = busyInvitees(invitees, availability);
+  // A task without a time blocks nobody, so every staff member shows as available.
+  const taskAvailability = useMemo(
+    () =>
+      hasTime
+        ? availability
+        : STAFF.filter((s) => s.id !== meId).map((s) => ({ staff: s, busy: null as string | null, busyAt: null })),
+    [hasTime, availability, meId],
+  );
 
   const canSave =
     kind === "meeting"
@@ -130,6 +141,7 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
           staffId: i.staffId,
           name: i.name,
           email: i.email,
+          whatsapp: i.whatsapp,
           external: !i.staffId,
           status: "pending",
         })),
@@ -149,9 +161,15 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
         done: false,
         notes: notes || undefined,
         ownerId: meId,
+        assignees: assignees.length ? assignees.map((a) => ({ staffId: a.staffId!, status: "pending" })) : undefined,
       };
       addItem(t);
-      toast("To-do added", `${t.title} · ${fmtDate(date)}${hasTime ? `, ${fmtTime(start)}` : ""}`, "ok");
+      const when = `${fmtDate(date)}${hasTime ? `, ${fmtTime(start)}` : ""}`;
+      if (assignees.length) {
+        toast(`Task sent to ${assignees.map((a) => staffById(a.staffId!).name.split(" ")[0]).join(", ")}`, `${t.title} · ${when}. They can accept or reject it.`, "ok");
+      } else {
+        toast("Task added", `${t.title} · ${when}`, "ok");
+      }
     }
     onCreated(date);
     onClose();
@@ -162,7 +180,7 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
       <div className="flex items-center justify-between border-b border-line px-5 py-4">
         <div>
           <h2 className="text-[16px] font-bold">New schedule item</h2>
-          <p className="text-[12.5px] text-muted">Add a meeting with people, or a to-do for your own work.</p>
+          <p className="text-[12.5px] text-muted">Add a meeting with people, or a task for yourself or your team.</p>
         </div>
         <button onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-page hover:text-ink" aria-label="Close">
           <X className="h-5 w-5" />
@@ -175,7 +193,7 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
           onChange={setKind}
           options={[
             { value: "meeting", label: "Meeting", icon: Users },
-            { value: "todo", label: "To-do", icon: ListTodo },
+            { value: "todo", label: "Task", icon: ListTodo },
           ]}
         />
 
@@ -212,7 +230,7 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
           {kind === "todo" && (
             <label className="mt-3 flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={hasTime} onChange={(e) => setHasTime(e.target.checked)} className="h-4 w-4 accent-brand" />
-              Set a time <span className="text-muted">(blocks your calendar; without a time it sits in the day&apos;s to-do list)</span>
+              Set a time <span className="text-muted">(blocks your calendar; without a time it sits in the day&apos;s task list)</span>
             </label>
           )}
         </section>
@@ -265,6 +283,21 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
           </>
         ) : (
           <section className="space-y-4 rounded-xl border border-line p-4">
+            <div>
+              <p className="mb-3 flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-muted">
+                <UserPlus className="h-4 w-4" /> Assign to
+                <span className="font-medium normal-case tracking-normal">· optional, leave empty to keep it for yourself</span>
+              </p>
+              <InviteePicker
+                value={assignees}
+                onChange={setAssignees}
+                availability={taskAvailability}
+                timeOk={!hasTime || timeOk}
+                showExternal={false}
+                allowBusy
+                staffLabel="Staff"
+              />
+            </div>
             <Field label="Priority">
               <Segmented
                 value={priority}
@@ -294,12 +327,14 @@ function CreateForm({ preset, onClose, onCreated }: { preset: CreatePreset; onCl
             ? invitees.length
               ? `${invitees.length} ${invitees.length === 1 ? "invite" : "invites"} will be emailed with Accept and Reject.`
               : "Add at least one invitee."
-            : "Only you can see your to-dos."}
+            : assignees.length
+              ? `${assignees.length} staff will get this task to accept or reject.`
+              : "Only you can see this task."}
         </p>
         <div className="flex shrink-0 gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={save} disabled={!canSave}>
-            {kind === "meeting" ? <><Send className="h-4 w-4" /> Save and send invites</> : <><CircleCheck className="h-4 w-4" /> Save to-do</>}
+            {kind === "meeting" ? <><Send className="h-4 w-4" /> Save and send invites</> : assignees.length ? <><Send className="h-4 w-4" /> Save and assign</> : <><CircleCheck className="h-4 w-4" /> Save task</>}
           </Button>
         </div>
       </div>

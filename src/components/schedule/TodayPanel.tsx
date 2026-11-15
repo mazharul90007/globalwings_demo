@@ -1,9 +1,9 @@
 "use client";
 
-import { Check, Clock, Flag, Link2, NotebookPen, Sparkles, Video } from "lucide-react";
+import { Check, Clock, Flag, Link2, ListTodo, NotebookPen, Sparkles, Users, Video } from "lucide-react";
 import { staffById } from "@/lib/data";
 import { useStore } from "@/lib/store";
-import { isMeeting, isTodo, myParticipant, needsWrapUp, todoState } from "@/lib/logic";
+import { isMeeting, isTodo, myParticipant, needsWrapUp, pendingTasksFor, todoState } from "@/lib/logic";
 import { TODAY, fmtDate, fmtRange, fmtTime, toMin } from "@/lib/time";
 import type { Meeting, ScheduleItem } from "@/lib/types";
 import { Avatar, Card } from "@/components/ui/primitives";
@@ -30,7 +30,8 @@ export function TodayPanel({
   onToggle: (id: string) => void;
   onAnswer: (id: string, a: "accepted" | "rejected") => void;
 }) {
-  const { me: meId } = useStore();
+  // `items` holds only what is on my calendar. Tasks waiting for my answer are not there yet.
+  const { me: meId, items: allItems } = useStore();
   const todays = items.filter((i) => i.date === TODAY);
   const meetings = todays
     .filter(isMeeting)
@@ -40,9 +41,11 @@ export function TodayPanel({
   const invites = items
     .filter(isMeeting)
     .filter((m) => m.organizerId !== meId && myParticipant(m, meId)?.status === "pending" && m.date >= TODAY);
+  const taskInvites = pendingTasksFor(allItems, meId);
+  const waiting = invites.length + taskInvites.length;
   const wrapUps = items.filter(isMeeting).filter((m) => needsWrapUp(m, nowMin, meId));
   const todos = todays.filter(isTodo).sort((a, b) => (a.start ?? "99").localeCompare(b.start ?? "99"));
-  const done = todos.filter((t) => t.done).length;
+  const done = todos.filter((t) => todoState(t, meId) === "done").length;
 
   return (
     <div className="space-y-4">
@@ -50,27 +53,41 @@ export function TodayPanel({
       {next ? <NextMeeting m={next} nowMin={nowMin} onOpen={onOpen} /> : (
         <Card className="p-4 text-center text-muted">
           <Sparkles className="mx-auto mb-2 h-6 w-6 text-warn" />
-          No more meetings today. Plan your day with a to-do.
+          No more meetings today. Plan your day with a task.
         </Card>
       )}
 
       {/* Invites waiting */}
-      {invites.length > 0 && (
-        <Card className="p-4">
+      {waiting > 0 && (
+        <Card className="space-y-2.5 p-4">
           <p className="mb-3 flex items-center gap-2 text-[12px] font-bold uppercase tracking-wide text-muted">
             Waiting for your answer
-            <span className="rounded-full bg-brand px-1.5 text-[10.5px] text-white">{invites.length}</span>
+            <span className="rounded-full bg-brand px-1.5 text-[10.5px] text-white">{waiting}</span>
           </p>
-          {invites.map((m) => (
+          {[
+            ...invites.map((m) => ({ id: m.id, kind: "meeting" as const, title: m.title, date: m.date, time: fmtRange(m.start, m.end), from: m.organizerId })),
+            ...taskInvites.map((t) => ({
+              id: t.id,
+              kind: "task" as const,
+              title: t.title,
+              date: t.date,
+              time: t.start && t.end ? fmtRange(t.start, t.end) : "Any time",
+              from: t.ownerId,
+            })),
+          ].map((m) => (
             <div key={m.id} className="rounded-lg border border-dashed border-brand/40 p-3">
-              <button className="block text-left" onClick={() => onOpen(m.id)}>
+              <button className="block w-full text-left" onClick={() => onOpen(m.id)}>
+                <span className="mb-1 flex w-fit items-center gap-1 rounded bg-brand-soft px-1.5 py-px text-[10.5px] font-bold uppercase text-brand">
+                  {m.kind === "meeting" ? <Users className="h-3 w-3" /> : <ListTodo className="h-3 w-3" />}
+                  {m.kind === "meeting" ? "Meeting invite" : "Task assigned"}
+                </span>
                 <p className="font-semibold">{m.title}</p>
                 <p className="text-[12px] text-muted">
-                  {fmtDate(m.date)} · {fmtRange(m.start, m.end)}
+                  {fmtDate(m.date)} · {m.time}
                 </p>
                 <p className="mt-1 flex items-center gap-1.5 text-[12px] text-muted">
-                  <Avatar name={staffById(m.organizerId).name} color={staffById(m.organizerId).color} size={18} />
-                  From {staffById(m.organizerId).name}
+                  <Avatar name={staffById(m.from).name} color={staffById(m.from).color} size={18} />
+                  From {staffById(m.from).name}
                 </p>
               </button>
               <div className="mt-2.5 flex gap-2">
@@ -92,10 +109,10 @@ export function TodayPanel({
         </Card>
       )}
 
-      {/* Today's to-dos */}
+      {/* Today's tasks */}
       <Card className="p-4">
         <div className="mb-2 flex items-center justify-between">
-          <p className="text-[12px] font-bold uppercase tracking-wide text-muted">Today&apos;s to-dos</p>
+          <p className="text-[12px] font-bold uppercase tracking-wide text-muted">Today&apos;s tasks</p>
           <span className="text-[12px] font-semibold text-ok">
             {done} of {todos.length} done
           </span>
@@ -105,7 +122,7 @@ export function TodayPanel({
         </div>
         <ul className="space-y-1">
           {todos.map((t) => {
-            const state = todoState(t);
+            const state = todoState(t, meId);
             return (
               <li key={t.id} className="group flex items-start gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-page">
                 <button

@@ -7,6 +7,11 @@ export const ME = 1;
 
 export const STAFF: Staff[] = [
   { id: 1, name: "Tanvir Ahmed", role: "Senior Counsellor", color: "#0087ca" },
+  { id: 9, name: "Arif Rahman", role: "Agent", color: "#d6336c" },
+  { id: 10, name: "Shirin Akter", role: "Agent", color: "#0c8599" },
+  { id: 11, name: "Kamal Hasan", role: "Agent", color: "#7950f2" },
+  { id: 12, name: "Rumana Chowdhury", role: "Counsellor", color: "#e67700" },
+  { id: 13, name: "Tareq Mahmud", role: "Counsellor", color: "#2b8a3e" },
   { id: 2, name: "Rahim Uddin", role: "Visa Officer", color: "#0ab39c" },
   { id: 3, name: "Nusrat Jahan", role: "Admissions Officer", color: "#f06548" },
   { id: 4, name: "Farhan Kabir", role: "Partnerships Lead", color: "#3577f1" },
@@ -229,9 +234,30 @@ export const INITIAL_ITEMS: ScheduleItem[] = shiftDummy<ScheduleItem[]>([
   { id: "o5", kind: "todo", title: "Walk-in desk", date: "2026-11-20", start: "09:00", end: "13:00", priority: "normal", done: false, ownerId: 7 },
   { id: "o6", kind: "todo", title: "Post the December campaign on Facebook", date: "2026-11-19", priority: "normal", done: false, ownerId: 5 },
   { id: "o7", kind: "todo", title: "Student fair budget sheet", date: "2026-11-19", start: "11:00", end: "12:00", priority: "high", done: false, ownerId: 5 },
+
+  // ---------- Assigned tasks ----------
+  // Tanvir gave this to two staff: Rahim accepted, Arif has not answered yet.
+  {
+    id: "a1", kind: "todo", title: "Collect missing documents for Karim Hasan", date: "2026-11-20",
+    start: "10:00", end: "11:00", priority: "high", done: false, ownerId: ME,
+    notes: "Passport copy, last two bank statements and the IELTS result.",
+    assignees: [
+      { staffId: 2, status: "accepted", respondedAt: "18 Nov, 4:10 PM" },
+      { staffId: 9, status: "pending" },
+    ],
+  },
+  // Farhan gave this to Tanvir, who still has to accept or reject it.
+  {
+    id: "a2", kind: "todo", title: "Check the BrightPath contract draft", date: "2026-11-20",
+    start: "15:00", end: "16:00", priority: "normal", done: false, ownerId: 4,
+    notes: "Look at the commission table on page 3.",
+    assignees: [{ staffId: ME, status: "pending" }],
+  },
 ]);
 
 export const INITIAL_NOTIFICATIONS: AppNotification[] = shiftDummy<AppNotification[]>([
+  { id: "n0", text: "Farhan Kabir assigned you a task: Check the BrightPath contract draft, 20 Nov, 3:00 PM. Accept or reject it.", time: "30 min ago", tone: "info", unread: true },
+  { id: "n0b", text: "Rahim Uddin accepted the task Collect missing documents for Karim Hasan, 20 Nov, 10:00 AM", time: "2 hours ago", tone: "ok", unread: true },
   { id: "n1", text: "Sadia Islam invited you to Marketing plan review, today 4:00 PM", time: "1 hour ago", tone: "info", unread: true },
   { id: "n2", text: "Ayesha Rahman accepted Visa file review, 20 Nov, 3:00 PM", time: "13 hours ago", tone: "ok", unread: true },
   { id: "n3", text: "Email to rashed.karim@mail.example was not delivered", time: "18 hours ago", tone: "bad", unread: false },
@@ -245,7 +271,7 @@ export const REPORT = {
     { label: "Meetings", value: "46", delta: "+12% vs last month", up: true },
     { label: "Acceptance rate", value: "87%", delta: "+4 pts", up: true },
     { label: "Avg response time", value: "3h 20m", delta: "−45 min", up: true },
-    { label: "To-dos on time", value: "78%", delta: "−3 pts", up: false },
+    { label: "Tasks on time", value: "78%", delta: "−3 pts", up: false },
     { label: "No-show rate", value: "6.5%", delta: "−1.2 pts", up: true },
   ],
   perStaff: [
