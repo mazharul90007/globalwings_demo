@@ -26,7 +26,7 @@ import { ScheduleTabs } from "@/components/shell/ScheduleTabs";
 import { Button, Card, Modal, inputCls } from "@/components/ui/primitives";
 import { CreateDrawer, type CreatePreset } from "./CreateDrawer";
 import { DetailsDrawer } from "./DetailsDrawer";
-import { MiniCalendar, MonthGrid } from "./MonthViews";
+import { MonthGrid } from "./MonthViews";
 import { TimeGrid } from "./TimeGrid";
 import { TodayPanel } from "./TodayPanel";
 
@@ -134,36 +134,7 @@ function ScheduleView() {
         </div>
       }
     >
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_290px] min-[1700px]:grid-cols-[240px_minmax(0,1fr)_290px]">
-        {/* Left column */}
-        <div className="hidden space-y-4 min-[1700px]:block">
-          <Card className="p-4">
-            <Button className="mb-4 w-full" onClick={() => setCreate({ kind: "meeting", date: anchor, start: "14:00" })}>
-              <Plus className="h-4 w-4" /> New meeting or task
-            </Button>
-            <MiniCalendar
-              selected={anchor}
-              view={view}
-              items={mine}
-              onPick={(d) => {
-                setAnchor(d);
-                if (view === "month") setView("day");
-              }}
-            />
-          </Card>
-          <Card className="p-4">
-            <p className="mb-3 text-[12px] font-bold uppercase tracking-wide text-muted">Colour key</p>
-            <ul className="space-y-2.5 text-[13px]">
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded bg-brand" /> Meeting</li>
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-2 border-dashed border-brand/60" /> Invite waiting for your answer</li>
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-warn bg-warn-soft" /> Task</li>
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-ok bg-ok-soft" /> Task done</li>
-              <li className="flex items-center gap-2.5"><span className="h-3.5 w-3.5 rounded border-l-[3px] border-bad bg-bad-soft" /> Task overdue</li>
-              <li className="flex items-center gap-2.5"><span className="striped-bg h-3.5 w-3.5 rounded border border-[#d5d9e6]" /> Cancelled</li>
-            </ul>
-          </Card>
-        </div>
-
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_290px]">
         {/* Calendar */}
         <Card className="flex min-w-0 flex-col self-start overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
